@@ -14,7 +14,7 @@ def main(rank, world):
         print('Rank-1 has recieved the following tensor from Rank-0')
         print(z)
         
-if __name__ == 'main':
+if __name__ == '__main__':
     print('Start test01')
     dist.init_process_group(backend='mpi')
     print('Before main')
