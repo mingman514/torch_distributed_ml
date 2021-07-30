@@ -1,28 +1,33 @@
 import os
+import socket
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 
-def run(rank, size):
+def run(rank, size, hostname):
     """ Distributed function to be implemented later. """
-    pass
+    print(f'This is {rank} of {size} in {hostname}')
+    tensor = torch.zeros(1)
 
-def init_process(rank, size, fn, backend='gloo'):
+    if rank == 0:
+        tensor += 1
+        dist.send(tensor=tensor, dst=1)
+        print(x)
+
+    else:
+        dist.recv(tensor=tensor, src=0)
+
+    print('Rank ', rank, ' has data ', tensor[0])
+
+def init_process(rank, size, hostname, fn, backend='mpi'):
     """ Initialize the distributed environment. """
-    os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '29500'
     dist.init_process_group(backend, rank=rank, world_size=size)
-    fn(rank, size)
+    fn(rank, size, hostname)
 
 
 if __name__ == "__main__":
-    size = 2
-    processes = []
-    mp.set_start_method("spawn")
-    for rank in range(size):
-        p = mp.Process(target=init_process, args=(rank, size, run))
-        p.start()
-        processes.append(p)
+    world_size = int(os.environ['MV2_COMM_WORLD_SIZE'])
+    world_rank = int(os.environ['MV2_COMM_WORLD_RANK'])
+    hostname = socket.gethostname()
 
-    for p in processes:
-        p.join()
+    print(f'world_size: {world_size}, world_rank: {world_rank}, hostname: {hostname}')
+    init_processes(world_rank, world_size, hostname, run, backend='mpi')
