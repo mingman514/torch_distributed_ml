@@ -18,7 +18,7 @@ def run(rank, size, hostname):
     print('Rank ', rank, ' has data ', tensor[0])
 
 
-def init_processes(rank, size, hostname, fn, backend='tcp'):
+def init_processes(rank, size, hostname, fn, backend='mpi'):
     """ Initialize the distributed environment. """
     dist.init_process_group(backend, rank=rank, world_size=size)
     fn(rank, size, hostname)
