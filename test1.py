@@ -12,8 +12,8 @@ def main(rank, world):
         dist.recv(z, src=0)
         print('Rank-1 has recieved the following tensor from Rank-0')
         print(z)
-if name == ‘main’:
+if name == 'main':
 
-dist.init_process_group(backend=‘mpi’)
+dist.init_process_group(backend='mpi')
 
 main(dist.get_rank(), dist.get_world_size())
