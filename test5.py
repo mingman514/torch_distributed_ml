@@ -23,8 +23,8 @@ from math import ceil
 from random import Random
 from torch.multiprocessing import Process
 from torch.autograd import Variable
-from torchvision import datasets, transforms
-from data.distributed import DistributedDataParallel
+#from torchvision import datasets, transforms
+#from data.distributed import DistributedDataParallel
 
 gbatch_size = 128
 
@@ -161,6 +161,7 @@ if __name__ == "__main__":
     dist.init_process_group(backend='mpi')
     size = dist.get_world_size()
     rank = dist.get_rank()
+    print('size: {}  rank: {}'.format(size, rank))
     init_print(rank, size)
 
-    run(rank, size)
+    #run(rank, size)

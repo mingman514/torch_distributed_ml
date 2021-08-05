@@ -11,7 +11,6 @@ def run(rank, size, hostname):
     if rank == 0:
         tensor += 1
         dist.send(tensor=tensor, dst=1)
-        print(x)
 
     else:
         dist.recv(tensor=tensor, src=0)
