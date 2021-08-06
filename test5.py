@@ -23,10 +23,10 @@ from math import ceil
 from random import Random
 from torch.multiprocessing import Process
 from torch.autograd import Variable
-#from torchvision import datasets, transforms
-#from data.distributed import DistributedDataParallel
+from torchvision import datasets, transforms
+from torch.nn.parallel import DistributedDataParallel
 
-gbatch_size = 128
+gbatch_size = 2
 
 class Partition(object):
     """ Dataset-like object, but only access a subset of it. """
@@ -105,7 +105,8 @@ def partition_dataset():
             transforms.Normalize((0.1307, ), (0.3081, ))
         ]))
     size = dist.get_world_size()
-    bsz = gbatch_size / float(size)
+    bsz = int(gbatch_size / float(size))
+    print("[DEBUG] bsz = ", bsz)
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)       
     train_set = torch.utils.data.DataLoader(                                    
         dataset, batch_size=bsz, shuffle=(train_sampler is None), sampler=train_sampler)
@@ -128,7 +129,7 @@ def run(rank, size):
             optimizer.zero_grad()
             output = model(data)
             loss = F.nll_loss(output, target)
-            epoch_loss += loss.data[0]
+            epoch_loss += loss.data
             loss.backward()
             optimizer.step()
         print('Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
@@ -164,4 +165,4 @@ if __name__ == "__main__":
     print('size: {}  rank: {}'.format(size, rank))
     init_print(rank, size)
 
-    #run(rank, size)
+    run(rank, size)
