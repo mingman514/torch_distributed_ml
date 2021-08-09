@@ -26,7 +26,7 @@ from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torch.nn.parallel import DistributedDataParallel
 
-gbatch_size = 2
+gbatch_size = 32
 
 class Partition(object):
     """ Dataset-like object, but only access a subset of it. """
@@ -159,6 +159,7 @@ def init_print(rank, size, debug_print=True):
         sys.stdout = LabeledStdout(rank, size)
 
 if __name__ == "__main__":
+    print("START PROCESS -test5.py")
     dist.init_process_group(backend='mpi')
     size = dist.get_world_size()
     rank = dist.get_rank()
@@ -166,3 +167,4 @@ if __name__ == "__main__":
     init_print(rank, size)
 
     run(rank, size)
+    print('Program End')
