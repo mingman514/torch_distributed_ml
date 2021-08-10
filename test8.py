@@ -109,7 +109,6 @@ def partition_dataset():
         ]))
     size = dist.get_world_size()
     bsz = int(gbatch_size / float(size))
-    print("[DEBUG] bsz = ", bsz)
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)       
     train_set = torch.utils.data.DataLoader(                                    
         dataset, batch_size=bsz, shuffle=(train_sampler is None), sampler=train_sampler)
@@ -121,80 +120,74 @@ def run(rank, size):
     print("RUN CODE STARTS")
     train_set, bsz = partition_dataset()
     model = Net()
-    model = DistributedDataParallel(model)
+    model = DistributedDataParallel(model) # model in which PS sending data does eixt?
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
-    group = dist.new_group(list(range(size)))   
-    # if master
-    
-    if rank == 0:
-        # send parameters to the slaves 
-        for param in model.parameters(): 
-            dist.broadcast(param, 0, group)
+    nodes_in_stake = list(range(size))
+    print('nodes_in_stake: ', nodes_in_stake)
+    group = dist.new_group(nodes_in_stake)
     num_batches = ceil(len(train_set.dataset) / (float(bsz) * dist.get_world_size()))
     #print("num_batches = ", num_batches) 
-    for epoch in range(10):
-        epoch_loss = 0.0
-        # 
+    for epoch in range(1):
+        epoch_loss = 0.0 
+        print('Train set length: ', len(train_set))
         for data, target in train_set:
             # slave compute the forward path 
             # i.e., compute the gradient, but do not update 
-            if rank != MASTER: 
-                data, target = Variable(data), Variable(target)
-                output = model(data)
-                loss = F.nll_loss(output, target)
-                epoch_loss += loss.data
-                print("slave activate")  
-                model.zero_grad()
-                loss.backward()
-            else:
-                print("master creates dummy gradienst")
-                data, target = Variable(data), Variable(target)
-                output = model(data)
-                loss = F.nll_loss(output, target)
-                epoch_loss += loss.data
-                model.zero_grad()
-                loss.backward()
+            data, target = Variable(data), Variable(target)
+            output = model(data)
+            loss = F.nll_loss(output, target)
+            epoch_loss += loss.data
+            model.zero_grad()
+            loss.backward()
+
             # aggregates gradients 
             for param in model.parameters():
-                if rank != MASTER:
-                    print("send")
-                    dist.reduce(param.grad.data, MASTER, op=dist.ReduceOp.SUM, group=group) 
-                param.grad.data /= (float(size) - 1)
-            
+                if rank == MASTER:
+                    print('PARAM BEFORE: ', param.grad.data)
+                dist.reduce(param.grad.data, MASTER, op=dist.ReduceOp.SUM, group=group) 
+                print('Rank: ',rank, ' REDUCE DONE')
+                # Average params in master node
+                if rank == MASTER:
+                    print('PARAM AFTER: ', param.grad.data)
+                    param.grad.data /= float(size)
+                # Broadcast params to slave nodes
+                dist.broadcast(param.grad.data, MASTER, group=group)
+                print('Rank: ',rank, ' BROADCAST DONE')
+
             optimizer.step()
-            print('Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
+        print('Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
                 epoch, epoch_loss / num_batches, gbatch_size, dist.get_world_size()))
-            # end slave training 
+#            # end slave training 
 
-def init_print(rank, size, debug_print=True):
-    if not debug_print:
-        """ In case run on hundreds of nodes, you may want to mute all the nodes except master """
-        if rank > 0:
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
-    else:
-        # labelled print with info of [rank/size]
-        old_out = sys.stdout
-        class LabeledStdout:
-            def __init__(self, rank, size):
-                self._r = rank
-                self._s = size
-                self.flush = sys.stdout.flush
-
-            def write(self, x):
-                if x == '\n':
-                    old_out.write(x)
-                else:
-                    old_out.write('[%d/%d] %s' % (self._r, self._s, x))
-
-        sys.stdout = LabeledStdout(rank, size)
+#def init_print(rank, size, debug_print=True):
+#    if not debug_print:
+#        """ In case run on hundreds of nodes, you may want to mute all the nodes except master """
+#        if rank > 0:
+#            sys.stdout = open(os.devnull, 'w')
+#            sys.stderr = open(os.devnull, 'w')
+#    else:
+#        # labelled print with info of [rank/size]
+#        old_out = sys.stdout
+#        class LabeledStdout:
+#            def __init__(self, rank, size):
+#                self._r = rank
+#                self._s = size
+#                self.flush = sys.stdout.flush
+#
+#            def write(self, x):
+#                if x == '\n':
+#                    old_out.write(x)
+#                else:
+#                    old_out.write('[%d/%d] %s' % (self._r, self._s, x))
+#
+#        sys.stdout = LabeledStdout(rank, size)
 
 if __name__ == "__main__":
     dist.init_process_group(backend='mpi')
     size = dist.get_world_size()
     rank = dist.get_rank()
     print('size: {}  rank: {}'.format(size, rank))
-    init_print(rank, size)
+#    init_print(rank, size)
 
     run(rank, size)
     print('Program End')

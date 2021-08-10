@@ -106,7 +106,6 @@ def partition_dataset():
         ]))
     size = dist.get_world_size()
     bsz = int(gbatch_size / float(size))
-    print("[DEBUG] bsz = ", bsz)
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)       
     train_set = torch.utils.data.DataLoader(                                    
         dataset, batch_size=bsz, shuffle=(train_sampler is None), sampler=train_sampler)
@@ -119,50 +118,44 @@ def average_gradients(model):
         param.grad.data /= size
 
 def run(rank, size):
-    """ Distributed Synchronous SGD Example """
-    torch.manual_seed(1234)
-    train_set, bsz = partition_dataset()
-    model = Net()
-    model = DistributedDataParallel(model)
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+    group = dist.new_group([0,1])
+    tensor = torch.zeros(1)
 
-    num_batches = ceil(len(train_set.dataset) / (float(bsz) * dist.get_world_size()))
-    #print("num_batches = ", num_batches) 
-    for epoch in range(10):
-        epoch_loss = 0.0
-        for data, target in train_set:
-            data, target = Variable(data), Variable(target)
-            optimizer.zero_grad()
-            output = model(data)
-            loss = F.nll_loss(output, target)
-            epoch_loss += loss.data
-            loss.backward()
-            optimizer.step()
-        print('Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
-            epoch, epoch_loss / num_batches, gbatch_size, dist.get_world_size()))
+    if rank == 0:
+        tensor += 1
+        print('Rank ', rank, ' tensor before: ', tensor[0])
 
-def init_print(rank, size, debug_print=True):
-    if not debug_print:
-        """ In case run on hundreds of nodes, you may want to mute all the nodes except master """
-        if rank > 0:
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
-    else:
-        # labelled print with info of [rank/size]
-        old_out = sys.stdout
-        class LabeledStdout:
-            def __init__(self, rank, size):
-                self._r = rank
-                self._s = size
-                self.flush = sys.stdout.flush
+    dist.broadcast(tensor=tensor, src=0, group=group)
+    print('Broadcast done')
+    print('Rank ', rank, 'has data ', tensor[0])
 
-            def write(self, x):
-                if x == '\n':
-                    old_out.write(x)
-                else:
-                    old_out.write('[%d/%d] %s' % (self._r, self._s, x))
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM, group=group)
+    print('all_reduce done')
+    print('Rank ', rank, 'has data ', tensor[0])
 
-        sys.stdout = LabeledStdout(rank, size)
+
+#def init_print(rank, size, debug_print=True):
+#    if not debug_print:
+#        """ In case run on hundreds of nodes, you may want to mute all the nodes except master """
+#        if rank > 0:
+#            sys.stdout = open(os.devnull, 'w')
+#            sys.stderr = open(os.devnull, 'w')
+#    else:
+#        # labelled print with info of [rank/size]
+#        old_out = sys.stdout
+#        class LabeledStdout:
+#            def __init__(self, rank, size):
+#                self._r = rank
+#                self._s = size
+#                self.flush = sys.stdout.flush
+#
+#            def write(self, x):
+#                if x == '\n':
+#                    old_out.write(x)
+#                else:
+#                    old_out.write('[%d/%d] %s' % (self._r, self._s, x))
+#
+#        sys.stdout = LabeledStdout(rank, size)
 
 if __name__ == "__main__":
     print("START PROCESS -test5.py")
@@ -170,7 +163,7 @@ if __name__ == "__main__":
     size = dist.get_world_size()
     rank = dist.get_rank()
     print('size: {}  rank: {}'.format(size, rank))
-    init_print(rank, size)
+#    init_print(rank, size)
 
     run(rank, size)
     print('Program End')
