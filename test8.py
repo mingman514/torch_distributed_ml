@@ -18,6 +18,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torchvision.models as models
 
 from math import ceil
 from random import Random
@@ -25,9 +26,10 @@ from torch.multiprocessing import Process
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torch.nn.parallel import DistributedDataParallel
+from torchsummary import summary
 
 gbatch_size = 32
-
+datapath = '/freeflow/shrd_datasets'
 MASTER = 0 
 
 
@@ -75,6 +77,25 @@ class DataPartitioner(object):
     def use(self, partition):
         return Partition(self.data, self.partitions[partition])
 
+class Lenet5(nn.Module):
+    def __init__(self):
+        super(Lenet5, self).__init__()
+        self.conv1 = nn.Conv2d(3, 6, 5) # input channels, output channels, kernel size
+        self.pool = nn.MaxPool2d(2, 2)  # kernel size, stride, padding = 0 (default)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.fc1 = nn.Linear(16 * 5 * 5, 120) # input features, output features
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 10)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(-1, 16 * 5 * 5)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
 
 class Net(nn.Module):
     """ Network architecture. """
@@ -99,14 +120,30 @@ class Net(nn.Module):
 
 def partition_dataset():
     """ Partitioning MNIST """
+    """ 
+    transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, ), (0.3081, ))
+        ])
     dataset = datasets.MNIST(
-        './data',
+        datapath,
         train=True,
         download=True,
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307, ), (0.3081, ))
         ]))
+    """
+    transform = transforms.Compose(
+            [transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    dataset = datasets.CIFAR10(
+        datapath,
+        train=True,
+        download=True,
+        transform=transform)
+#    """
     size = dist.get_world_size()
     bsz = int(gbatch_size / float(size))
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)       
@@ -119,7 +156,9 @@ def run(rank, size):
     """ Distributed Synchronous SGD Example """
     print("RUN CODE STARTS")
     train_set, bsz = partition_dataset()
-    model = Net()
+#    model = Lenet5()
+#    model = Net()
+    model = models.resnet152()
     model = DistributedDataParallel(model) # model in which PS sending data does eixt?
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
     nodes_in_stake = list(range(size))
@@ -127,36 +166,49 @@ def run(rank, size):
     group = dist.new_group(nodes_in_stake)
     num_batches = ceil(len(train_set.dataset) / (float(bsz) * dist.get_world_size()))
     #print("num_batches = ", num_batches) 
-    for epoch in range(1):
+    for epoch in range(2):
         epoch_loss = 0.0 
         print('Train set length: ', len(train_set))
+        i=0
+        
+        #"""
         for data, target in train_set:
+            if i!=0:
+                break
+            i+=1
             # slave compute the forward path 
             # i.e., compute the gradient, but do not update 
             data, target = Variable(data), Variable(target)
+            # print('data is ', data)
             output = model(data)
             loss = F.nll_loss(output, target)
             epoch_loss += loss.data
             model.zero_grad()
             loss.backward()
-
+            """
+        for i, data in enumerate(train_set, 0):
+            inputs, labels = data
+            outputs = model(inputs)
+            loss = F.nll_loss(outputs, labels)
+            epoch_loss += loss.data
+            model.zero_grad()
+            loss.backward()
+            """
             # aggregates gradients 
             for param in model.parameters():
-                if rank == MASTER:
-                    print('PARAM BEFORE: ', param.grad.data)
                 dist.reduce(param.grad.data, MASTER, op=dist.ReduceOp.SUM, group=group) 
-                print('Rank: ',rank, ' REDUCE DONE')
                 # Average params in master node
                 if rank == MASTER:
-                    print('PARAM AFTER: ', param.grad.data)
                     param.grad.data /= float(size)
                 # Broadcast params to slave nodes
                 dist.broadcast(param.grad.data, MASTER, group=group)
-                print('Rank: ',rank, ' BROADCAST DONE')
+               # print('Rank: ',rank, ' BROADCAST Result: ', param.grad.data[0])
+                optimizer.step()
 
-            optimizer.step()
-        print('Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
-                epoch, epoch_loss / num_batches, gbatch_size, dist.get_world_size()))
+#        if rank == MASTER:
+            print('Rank #{} Epoch {} Loss {:.6f} Global batch size {} on {} ranks'.format(
+                rank,epoch, epoch_loss / num_batches, gbatch_size, dist.get_world_size()))
+#    summary(model, (1, 28, 28))
 #            # end slave training 
 
 #def init_print(rank, size, debug_print=True):
